@@ -3,6 +3,7 @@ package org.apache.spark.sql.cassandra
 import java.io.IOException
 
 import com.datastax.driver.core.Metadata
+import com.datastax.spark.connector.types.VarIntType
 import com.datastax.spark.connector.util.NameTools
 import org.apache.spark.{SparkConf, Logging}
 
@@ -125,16 +126,45 @@ private[cassandra] class CassandraSourceRelation(
   /** Construct Cql clause and retrieve the values from filter */
   private def filterToCqlAndValue(filter: Any): (String, Seq[Any]) = {
     filter match {
-      case sources.EqualTo(attribute, value)            => (s"${quote(attribute)} = ?", Seq(value))
-      case sources.LessThan(attribute, value)           => (s"${quote(attribute)} < ?", Seq(value))
-      case sources.LessThanOrEqual(attribute, value)    => (s"${quote(attribute)} <= ?", Seq(value))
-      case sources.GreaterThan(attribute, value)        => (s"${quote(attribute)} > ?", Seq(value))
-      case sources.GreaterThanOrEqual(attribute, value) => (s"${quote(attribute)} >= ?", Seq(value))
+      case sources.EqualTo(attribute, value)            => (s"${quote(attribute)} = ?", Seq(toCqlValue(attribute, value)))
+      case sources.LessThan(attribute, value)           => (s"${quote(attribute)} < ?", Seq(toCqlValue(attribute, value)))
+      case sources.LessThanOrEqual(attribute, value)    => (s"${quote(attribute)} <= ?", Seq(toCqlValue(attribute, value)))
+      case sources.GreaterThan(attribute, value)        => (s"${quote(attribute)} > ?", Seq(toCqlValue(attribute, value)))
+      case sources.GreaterThanOrEqual(attribute, value) => (s"${quote(attribute)} >= ?", Seq(toCqlValue(attribute, value)))
       case sources.In(attribute, values)                 =>
-        (quote(attribute) + " IN " + values.map(_ => "?").mkString("(", ", ", ")"), values.toSeq)
+        (quote(attribute) + " IN " + values.map(_ => "?").mkString("(", ", ", ")"), toCqlValues(attribute, values))
       case _ =>
         throw new UnsupportedOperationException(
           s"It's not a valid filter $filter to be pushed down, only >, <, >=, <= and In are allowed.")
+    }
+  }
+
+  private def toCqlValues(columnName: String, values: Array[Any]): Seq[Any] = {
+    if (VarIntColumn(columnName)) {
+      values.map(toBigInt).toSeq
+    } else {
+      values.toSeq
+    }
+  }
+
+  /** If column is VarInt column, convert data to BigInteger */
+  private def toCqlValue(columnName: String, value: Any): Any = {
+    if (VarIntColumn(columnName)) {
+      toBigInt(value)
+    } else {
+      value
+    }
+  }
+
+  private def VarIntColumn(columnName: String): Boolean = {
+    tableDef.columnByName(columnName).columnType == VarIntType
+  }
+
+  /** Convert decimal to BigInteger */
+  private def toBigInt(value: Any): Any = {
+    value match {
+      case decimal: org.apache.spark.sql.types.Decimal => decimal.toJavaBigDecimal.toBigInteger
+      case _ => value
     }
   }
 

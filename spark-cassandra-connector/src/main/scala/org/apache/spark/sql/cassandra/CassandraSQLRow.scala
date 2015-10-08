@@ -49,6 +49,7 @@ object CassandraSQLRow {
         case date: Date => data.update(i, new Timestamp(date.getTime))
         case str: String => data.update(i, UTF8String(str))
         case set: Set[_] => data.update(i, set.toSeq)
+        case bigInt: java.math.BigInteger => data.update(i, org.apache.spark.sql.types.Decimal(bigInt.toString))
         case _ =>
       }
     }
